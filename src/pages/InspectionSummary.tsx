@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Star, Check, X, Camera, FileText,
+  ArrowLeft, Check, X, Camera, FileText,
   Loader2, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle,
 } from 'lucide-react'
 import { useTenant } from '../hooks/useTenant'
 import { useInspection } from '../hooks/useInspection'
 import { KnownIssueCard } from '../components/KnownIssueCard'
+import { CustomerReportUpload } from '../components/CustomerReportUpload'
+import { generateInspectionReport } from '../lib/generateReport'
+import { supabase } from '../lib/supabase'
 
 export const InspectionSummary: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -23,6 +26,7 @@ export const InspectionSummary: React.FC = () => {
   const [generalNotes, setGeneralNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [completed, setCompleted] = useState(false)
+  const [generating, setGenerating] = useState(false)
 
   const basePath = tenant ? `/${tenant}` : ''
 
@@ -43,11 +47,11 @@ export const InspectionSummary: React.FC = () => {
   }, [inspection])
 
   const handleDecision = async (decision: 'interested' | 'pass') => {
-    if (!id || !overallRating) return
+    if (!id) return
 
     setSubmitting(true)
     try {
-      const success = await completeInspection(id, overallRating, decision, generalNotes)
+      const success = await completeInspection(id, overallRating || 0, decision, generalNotes)
       if (success) {
         setCompleted(true)
         await loadInspection(id)
@@ -57,9 +61,43 @@ export const InspectionSummary: React.FC = () => {
     }
   }
 
-  const handleGenerateReport = () => {
-    // PDF generation via Edge Function — placeholder for now
-    alert('PDF report generation will be available soon. The Edge Function needs to be deployed separately.')
+  const handleGenerateReport = async () => {
+    if (!inspection || !id) return
+    setGenerating(true)
+    try {
+      const doc = await generateInspectionReport(inspection)
+      const pdfBlob = doc.output('blob')
+      const fileName = `${id}/report.pdf`
+
+      // Upload to Supabase Storage
+      await supabase.storage
+        .from('inspection-photos')
+        .upload(fileName, pdfBlob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        })
+
+      const { data: urlData } = supabase.storage
+        .from('inspection-photos')
+        .getPublicUrl(fileName)
+
+      // Save report URL to inspection
+      await supabase.rpc('update_inspection_report_url', {
+        p_inspection_id: id,
+        p_report_url: urlData.publicUrl,
+      })
+
+      // Open the PDF
+      window.open(urlData.publicUrl, '_blank')
+
+      // Reload to show updated state
+      await loadInspection(id)
+    } catch (err) {
+      console.error('Error generating report:', err)
+      alert('Failed to generate report. Please try again.')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   if (loading && !inspection) {
@@ -261,47 +299,9 @@ export const InspectionSummary: React.FC = () => {
                         {step.photos.length} photo{step.photos.length > 1 ? 's' : ''}
                       </span>
                     )}
-                    {step.rating && (
-                      <div className="flex items-center space-x-0.5">
-                        {[1, 2, 3, 4, 5].map((r) => (
-                          <Star
-                            key={r}
-                            className={`w-3 h-3 ${
-                              r <= step.rating!
-                                ? 'fill-yellow-400 text-yellow-400'
-                                : 'text-gray-200'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               ))}
-          </div>
-        </div>
-
-        {/* Overall Rating */}
-        <div className="bg-white rounded-lg shadow-sm border p-3 mb-3">
-          <h2 className="text-sm font-semibold text-gray-900 mb-2">Overall Rating</h2>
-          <div className="flex justify-center space-x-3">
-            {[1, 2, 3, 4, 5].map((rating) => (
-              <button
-                key={rating}
-                type="button"
-                onClick={() => !completed && setOverallRating(rating === overallRating ? 0 : rating)}
-                disabled={completed}
-                className="touch-manipulation disabled:cursor-default"
-              >
-                <Star
-                  className={`w-9 h-9 ${
-                    rating <= overallRating
-                      ? 'fill-yellow-400 text-yellow-400'
-                      : 'text-gray-300'
-                  }`}
-                />
-              </button>
-            ))}
           </div>
         </div>
 
@@ -322,15 +322,10 @@ export const InspectionSummary: React.FC = () => {
         {/* Decision */}
         {!completed ? (
           <div className="space-y-2">
-            {!overallRating && (
-              <p className="text-xs text-center text-red-500">
-                Please set an overall rating before making a decision.
-              </p>
-            )}
             <div className="flex space-x-3">
               <button
                 onClick={() => handleDecision('pass')}
-                disabled={!overallRating || submitting}
+                disabled={submitting}
                 className="flex-1 flex items-center justify-center space-x-2 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 touch-manipulation"
               >
                 {submitting ? (
@@ -344,7 +339,7 @@ export const InspectionSummary: React.FC = () => {
               </button>
               <button
                 onClick={() => handleDecision('interested')}
-                disabled={!overallRating || submitting}
+                disabled={submitting}
                 className="flex-1 flex items-center justify-center space-x-2 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 touch-manipulation"
               >
                 {submitting ? (
@@ -381,16 +376,32 @@ export const InspectionSummary: React.FC = () => {
               )}
             </div>
 
-            {/* Generate Report (only for interested) */}
-            {inspection.decision === 'interested' && (
-              <button
-                onClick={handleGenerateReport}
-                className="w-full flex items-center justify-center space-x-2 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors touch-manipulation"
-              >
+            {/* Customer Reports */}
+            <CustomerReportUpload
+              reports={inspection.customerReports || []}
+              inspectionId={id!}
+              vehicleInfo={{
+                year: inspection.vehicleYear,
+                make: inspection.vehicleMake,
+                model: inspection.vehicleModel,
+                trim: inspection.vehicleTrim,
+              }}
+              onReportChange={() => loadInspection(id!)}
+            />
+
+            {/* Generate Report */}
+            <button
+              onClick={handleGenerateReport}
+              disabled={generating}
+              className="w-full flex items-center justify-center space-x-2 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors touch-manipulation disabled:opacity-50"
+            >
+              {generating ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
                 <FileText className="w-5 h-5" />
-                <span>Generate PDF Report</span>
-              </button>
-            )}
+              )}
+              <span>{generating ? 'Generating...' : inspection.reportUrl ? 'Regenerate PDF Report' : 'Generate PDF Report'}</span>
+            </button>
 
             {/* Back to Dashboard */}
             <button

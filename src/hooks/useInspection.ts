@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { Inspection, InspectionStep, ChecklistItem, VehicleKnownIssue } from '../types'
+import { Inspection, InspectionStep, ChecklistItem, VehicleKnownIssue, CustomerReport, CustomerReportType } from '../types'
 
 function mapInspection(data: Record<string, unknown>): Inspection {
   return {
@@ -37,6 +37,17 @@ function mapInspection(data: Record<string, unknown>): Inspection {
           title: ki.title as string,
           description: ki.description as string,
           source: ki.source as string,
+        }))
+      : undefined,
+    customerReports: data.customer_reports
+      ? (data.customer_reports as Record<string, unknown>[]).map((cr) => ({
+          reportType: cr.report_type as CustomerReportType,
+          fileUrl: cr.file_url as string,
+          fileName: cr.file_name as string,
+          fileType: cr.file_type as string,
+          aiSummary: (cr.ai_summary as string) || null,
+          aiAnalyzedAt: cr.ai_analyzed_at ? new Date(cr.ai_analyzed_at as string) : null,
+          uploadedAt: new Date(cr.uploaded_at as string),
         }))
       : undefined,
   }
@@ -263,6 +274,41 @@ export const useInspection = () => {
     }
   }, [])
 
+  const deleteInspection = useCallback(async (
+    inspectionId: string
+  ): Promise<boolean> => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const { data, error: rpcError } = await supabase.rpc('delete_inspection', {
+        p_inspection_id: inspectionId,
+      })
+
+      if (rpcError) throw rpcError
+
+      // Clean up storage files
+      const result = data as { deleted: boolean; photo_paths: { inspection_id: string; step_number: number; photo_order: number }[] }
+      if (result.photo_paths?.length > 0) {
+        const filePaths = result.photo_paths.map(
+          (p) => `${p.inspection_id}/${p.step_number}/${p.photo_order}.jpg`
+        )
+        await supabase.storage.from('inspection-photos').remove(filePaths)
+      }
+
+      // Remove from local state
+      setInspections((prev) => prev.filter((i) => i.id !== inspectionId))
+
+      return true
+    } catch (err) {
+      console.error('Error deleting inspection:', err)
+      setError(err instanceof Error ? err.message : 'Failed to delete inspection')
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   return {
     inspection,
     inspections,
@@ -274,5 +320,6 @@ export const useInspection = () => {
     updateStep,
     updateCurrentStep,
     completeInspection,
+    deleteInspection,
   }
 }

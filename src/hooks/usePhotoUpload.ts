@@ -4,7 +4,47 @@ import { InspectionPhoto } from '../types'
 
 export const usePhotoUpload = () => {
   const [uploading, setUploading] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const analyzePhoto = useCallback(async (
+    photoId: string,
+    photoUrl: string,
+    stepName: string,
+    vehicleInfo?: { year?: number | null; make?: string; model?: string; trim?: string }
+  ): Promise<{ analysis: string; verdict: string } | null> => {
+    try {
+      setAnalyzing(true)
+
+      const response = await fetch('/.netlify/functions/analyze-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoUrl, stepName, vehicleInfo }),
+      })
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        console.error('AI analysis failed:', errData)
+        return null
+      }
+
+      const { analysis, verdict } = await response.json()
+
+      // Save analysis to DB via RPC
+      await supabase.rpc('save_photo_analysis', {
+        p_photo_id: photoId,
+        p_ai_analysis: analysis,
+        p_ai_verdict: verdict,
+      })
+
+      return { analysis, verdict }
+    } catch (err) {
+      console.error('Error analyzing photo:', err)
+      return null
+    } finally {
+      setAnalyzing(false)
+    }
+  }, [])
 
   const uploadPhoto = useCallback(async (
     file: File,
@@ -99,8 +139,10 @@ export const usePhotoUpload = () => {
 
   return {
     uploading,
+    analyzing,
     error,
     uploadPhoto,
     deletePhoto,
+    analyzePhoto,
   }
 }

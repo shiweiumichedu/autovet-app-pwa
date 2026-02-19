@@ -1,15 +1,15 @@
+functionsDirectory = "/Users/shiwei/repo/github/autovet-app-pwa/netlify/functions"
+functionsDirectoryOrigin = "config"
+redirectsOrigin = "config"
 plugins = []
 headers = []
 
-[functions]
-
-[functions."*"]
-
 [build]
 publish = "/Users/shiwei/repo/github/autovet-app-pwa/dist"
-publishOrigin = "ui"
-commandOrigin = "ui"
+publishOrigin = "config"
+commandOrigin = "config"
 command = "npm run build"
+functions = "/Users/shiwei/repo/github/autovet-app-pwa/netlify/functions"
 
 [build.environment]
 
@@ -24,6 +24,10 @@ command = "npm run build"
 [build.processing.js]
 
 [build.services]
+
+[functions]
+
+[functions."*"]
 
 [[redirects]]
 from = "/*"

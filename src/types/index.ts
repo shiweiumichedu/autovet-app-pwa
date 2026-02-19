@@ -54,6 +54,7 @@ export interface Inspection {
   updatedAt: Date
   steps?: InspectionStep[]
   knownIssues?: VehicleKnownIssue[]
+  customerReports?: CustomerReport[]
 }
 
 export interface InspectionStep {
@@ -91,6 +92,18 @@ export interface InspectionPhoto {
   aiAnalysis: string | null
   aiVerdict: 'ok' | 'warning' | 'issue' | null
   aiAnalyzedAt: Date | null
+}
+
+export type CustomerReportType = 'obd2' | 'carfax' | 'autocheck'
+
+export interface CustomerReport {
+  reportType: CustomerReportType
+  fileUrl: string
+  fileName: string
+  fileType: string
+  aiSummary: string | null
+  aiAnalyzedAt: Date | null
+  uploadedAt: Date
 }
 
 export interface VehicleKnownIssue {

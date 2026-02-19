@@ -1,11 +1,12 @@
-import React, { useRef } from 'react'
-import { Camera, X, Loader2 } from 'lucide-react'
+import React, { useRef, useState } from 'react'
+import { Camera, X, Loader2, Brain } from 'lucide-react'
 import { InspectionPhoto } from '../types'
 
 interface PhotoCaptureProps {
   photos: InspectionPhoto[]
   maxPhotos: number
   uploading: boolean
+  analyzing?: boolean
   onCapture: (file: File, photoOrder: number) => void
   onDelete: (photo: InspectionPhoto) => void
   disabled?: boolean
@@ -15,12 +16,14 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
   photos,
   maxPhotos,
   uploading,
+  analyzing = false,
   onCapture,
   onDelete,
   disabled = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingOrderRef = useRef<number>(1)
+  const [expandedPhoto, setExpandedPhoto] = useState<string | null>(null)
 
   const handleCapture = (photoOrder: number) => {
     if (disabled || uploading) return
@@ -60,34 +63,54 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
           const order = i + 1
 
           if (photo) {
+            const isExpanded = expandedPhoto === photo.id
             return (
-              <div key={order} className="relative aspect-[3/2] rounded overflow-hidden bg-gray-100">
-                <img
-                  src={photo.photoUrl}
-                  alt={`Photo ${order}`}
-                  className="w-full h-full object-cover"
-                />
-                {photo.aiVerdict && (
-                  <div
-                    className={`absolute top-0.5 left-0.5 px-1 py-px rounded text-[9px] font-medium ${
-                      photo.aiVerdict === 'ok'
-                        ? 'bg-green-500 text-white'
-                        : photo.aiVerdict === 'warning'
-                        ? 'bg-yellow-500 text-white'
-                        : 'bg-red-500 text-white'
-                    }`}
-                  >
-                    {photo.aiVerdict}
+              <div key={order} className="relative">
+                <div
+                  className="relative aspect-[3/2] rounded overflow-hidden bg-gray-100 cursor-pointer"
+                  onClick={() => setExpandedPhoto(isExpanded ? null : photo.id)}
+                >
+                  <img
+                    src={photo.photoUrl}
+                    alt={`Photo ${order}`}
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Analyzing spinner */}
+                  {analyzing && !photo.aiVerdict && (
+                    <div className="absolute top-0.5 left-0.5 flex items-center space-x-0.5 px-1 py-px rounded bg-blue-500 text-white">
+                      <Brain className="w-2.5 h-2.5 animate-pulse" />
+                      <span className="text-[9px] font-medium">Analyzing...</span>
+                    </div>
+                  )}
+                  {/* Verdict badge */}
+                  {photo.aiVerdict && (
+                    <div
+                      className={`absolute top-0.5 left-0.5 px-1 py-px rounded text-[9px] font-medium ${
+                        photo.aiVerdict === 'ok'
+                          ? 'bg-green-500 text-white'
+                          : photo.aiVerdict === 'warning'
+                          ? 'bg-yellow-500 text-white'
+                          : 'bg-red-500 text-white'
+                      }`}
+                    >
+                      {photo.aiVerdict === 'ok' ? 'OK' : photo.aiVerdict === 'warning' ? 'Warning' : 'Issue'}
+                    </div>
+                  )}
+                  {!disabled && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onDelete(photo) }}
+                      className="absolute top-0.5 right-0.5 p-0.5 bg-black/50 rounded-full text-white touch-manipulation"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                {/* Expandable AI analysis text */}
+                {isExpanded && photo.aiAnalysis && (
+                  <div className="mt-1 p-1.5 bg-gray-50 rounded border text-[10px] text-gray-700 leading-tight">
+                    {photo.aiAnalysis}
                   </div>
-                )}
-                {!disabled && (
-                  <button
-                    type="button"
-                    onClick={() => onDelete(photo)}
-                    className="absolute top-0.5 right-0.5 p-0.5 bg-black/50 rounded-full text-white touch-manipulation"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
                 )}
               </div>
             )

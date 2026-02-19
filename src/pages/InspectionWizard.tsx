@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronLeft, ChevronRight, Save, Loader2, Star } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Save, Loader2 } from 'lucide-react'
 import { useTenant } from '../hooks/useTenant'
 import { useInspection } from '../hooks/useInspection'
 import { usePhotoUpload } from '../hooks/usePhotoUpload'
@@ -20,7 +20,7 @@ export const InspectionWizard: React.FC = () => {
     updateStep,
     updateCurrentStep,
   } = useInspection()
-  const { uploading, error: photoError, uploadPhoto, deletePhoto } = usePhotoUpload()
+  const { uploading, analyzing, error: photoError, uploadPhoto, deletePhoto, analyzePhoto } = usePhotoUpload()
 
   const [currentStepNum, setCurrentStepNum] = useState(2) // Start at step 2 (step 1 = vehicle info, done)
   const [stepNotes, setStepNotes] = useState('')
@@ -144,6 +144,16 @@ export const InspectionWizard: React.FC = () => {
     if (result) {
       // Reload inspection to get updated photos
       await loadInspection(id)
+      // Trigger AI analysis in background
+      analyzePhoto(result.id, result.photoUrl, currentStep.stepName, {
+        year: inspection?.vehicleYear,
+        make: inspection?.vehicleMake,
+        model: inspection?.vehicleModel,
+        trim: inspection?.vehicleTrim,
+      }).then(() => {
+        // Reload to show analysis results
+        if (id) loadInspection(id)
+      })
     }
   }
 
@@ -251,6 +261,7 @@ export const InspectionWizard: React.FC = () => {
                   photos={currentStep.photos || []}
                   maxPhotos={2}
                   uploading={uploading}
+                  analyzing={analyzing}
                   onCapture={handlePhotoCapture}
                   onDelete={handlePhotoDelete}
                 />
@@ -277,27 +288,6 @@ export const InspectionWizard: React.FC = () => {
                 className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 style={{ fontSize: '16px' }}
               />
-              <div className="flex items-center mt-1.5 pt-1.5 border-t">
-                <span className="text-[11px] font-medium text-gray-600 mr-2">Rating</span>
-                <div className="flex space-x-1.5">
-                  {[1, 2, 3, 4, 5].map((rating) => (
-                    <button
-                      key={rating}
-                      type="button"
-                      onClick={() => setStepRating(rating === stepRating ? 0 : rating)}
-                      className="touch-manipulation"
-                    >
-                      <Star
-                        className={`w-6 h-6 ${
-                          rating <= stepRating
-                            ? 'fill-yellow-400 text-yellow-400'
-                            : 'text-gray-300'
-                        }`}
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           </>
         )}
