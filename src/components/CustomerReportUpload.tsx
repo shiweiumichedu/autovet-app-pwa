@@ -1,5 +1,5 @@
 import React, { useRef } from 'react'
-import { Upload, Trash2, FileText, Loader2, CheckCircle } from 'lucide-react'
+import { Upload, Trash2, FileText, Loader2, CheckCircle, AlertTriangle, XCircle } from 'lucide-react'
 import { CustomerReport, CustomerReportType } from '../types'
 import { useReportUpload } from '../hooks/useReportUpload'
 
@@ -15,6 +15,12 @@ const REPORT_SLOTS: { type: CustomerReportType; label: string }[] = [
   { type: 'carfax', label: 'CarFax Report' },
   { type: 'autocheck', label: 'AutoCheck Report' },
 ]
+
+const verdictConfig = {
+  ok: { label: 'OK', color: 'text-green-600 bg-green-50 border-green-200', icon: CheckCircle },
+  warning: { label: 'Warning', color: 'text-yellow-600 bg-yellow-50 border-yellow-200', icon: AlertTriangle },
+  issue: { label: 'Issue', color: 'text-red-600 bg-red-50 border-red-200', icon: XCircle },
+} as const
 
 export const CustomerReportUpload: React.FC<Props> = ({
   reports,
@@ -33,13 +39,13 @@ export const CustomerReportUpload: React.FC<Props> = ({
     if (result) {
       onReportChange()
       // Auto-analyze after upload
-      await analyzeReport(result.fileUrl, type, result.fileType, inspectionId, vehicleInfo)
+      await analyzeReport(result.id, result.fileUrl, type, result.fileType, vehicleInfo)
       onReportChange()
     }
   }
 
-  const handleDelete = async (type: CustomerReportType) => {
-    const ok = await deleteReport(inspectionId, type)
+  const handleDelete = async (report: CustomerReport) => {
+    const ok = await deleteReport(report.id, inspectionId, report.reportType)
     if (ok) onReportChange()
   }
 
@@ -67,7 +73,7 @@ export const CustomerReportUpload: React.FC<Props> = ({
                 <span className="text-xs font-medium text-gray-700">{label}</span>
                 {report && !isUploading && !isAnalyzing && (
                   <button
-                    onClick={() => handleDelete(type)}
+                    onClick={() => handleDelete(report)}
                     className="text-red-400 hover:text-red-600 p-0.5 touch-manipulation"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -91,9 +97,15 @@ export const CustomerReportUpload: React.FC<Props> = ({
                     <CheckCircle className="w-3 h-3 text-green-500" />
                     <span className="truncate">{report.fileName}</span>
                   </div>
-                  {report.aiSummary ? (
+                  {report.aiVerdict && (
+                    <div className={`inline-flex items-center space-x-1 px-1.5 py-0.5 rounded border text-[10px] font-medium mb-1 ${verdictConfig[report.aiVerdict].color}`}>
+                      {React.createElement(verdictConfig[report.aiVerdict].icon, { className: 'w-2.5 h-2.5' })}
+                      <span>{verdictConfig[report.aiVerdict].label}</span>
+                    </div>
+                  )}
+                  {report.aiAnalysis ? (
                     <div className="bg-gray-50 rounded p-2 text-[11px] text-gray-700 leading-relaxed whitespace-pre-wrap max-h-40 overflow-y-auto">
-                      {report.aiSummary}
+                      {report.aiAnalysis}
                     </div>
                   ) : (
                     <p className="text-[10px] text-gray-400 italic">Analysis pending...</p>

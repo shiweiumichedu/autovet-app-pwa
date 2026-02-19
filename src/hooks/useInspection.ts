@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { Inspection, InspectionStep, ChecklistItem, VehicleKnownIssue, CustomerReport, CustomerReportType } from '../types'
+import { Inspection, InspectionStep, ChecklistItem, CustomerReport, CustomerReportType } from '../types'
 
 function mapInspection(data: Record<string, unknown>): Inspection {
   return {
@@ -41,13 +41,16 @@ function mapInspection(data: Record<string, unknown>): Inspection {
       : undefined,
     customerReports: data.customer_reports
       ? (data.customer_reports as Record<string, unknown>[]).map((cr) => ({
+          id: cr.id as string,
+          inspectionId: cr.inspection_id as string,
           reportType: cr.report_type as CustomerReportType,
           fileUrl: cr.file_url as string,
           fileName: cr.file_name as string,
           fileType: cr.file_type as string,
-          aiSummary: (cr.ai_summary as string) || null,
+          aiAnalysis: (cr.ai_analysis as string) || null,
+          aiVerdict: cr.ai_verdict as CustomerReport['aiVerdict'],
           aiAnalyzedAt: cr.ai_analyzed_at ? new Date(cr.ai_analyzed_at as string) : null,
-          uploadedAt: new Date(cr.uploaded_at as string),
+          createdAt: new Date(cr.created_at as string),
         }))
       : undefined,
   }

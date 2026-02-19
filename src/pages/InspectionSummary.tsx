@@ -69,11 +69,12 @@ export const InspectionSummary: React.FC = () => {
       const pdfBlob = doc.output('blob')
       const fileName = `${id}/report.pdf`
 
-      // Upload to Supabase Storage
+      // Upload to Supabase Storage (no-cache so regenerated PDFs are fresh)
       await supabase.storage
         .from('inspection-photos')
         .upload(fileName, pdfBlob, {
           contentType: 'application/pdf',
+          cacheControl: '0',
           upsert: true,
         })
 
@@ -87,8 +88,8 @@ export const InspectionSummary: React.FC = () => {
         p_report_url: urlData.publicUrl,
       })
 
-      // Open the PDF
-      window.open(urlData.publicUrl, '_blank')
+      // Open the PDF with cache-busting param
+      window.open(`${urlData.publicUrl}?t=${Date.now()}`, '_blank')
 
       // Reload to show updated state
       await loadInspection(id)

@@ -217,6 +217,16 @@ export async function generateInspectionReport(inspection: Inspection): Promise<
       doc.setFontSize(11)
       doc.setFont('helvetica', 'bold')
       doc.text(reportLabels[report.reportType] || report.reportType, margin, y)
+
+      if (report.aiVerdict) {
+        const verdictColor: [number, number, number] =
+          report.aiVerdict === 'ok' ? [22, 163, 74] :
+          report.aiVerdict === 'warning' ? [202, 138, 4] : [220, 38, 38]
+        doc.setFontSize(9)
+        doc.setTextColor(...verdictColor)
+        doc.text(`[${report.aiVerdict.toUpperCase()}]`, margin + doc.getTextWidth(reportLabels[report.reportType] || report.reportType) + 3, y)
+        doc.setTextColor(0, 0, 0)
+      }
       y += 5
 
       doc.setFontSize(8)
@@ -226,11 +236,11 @@ export async function generateInspectionReport(inspection: Inspection): Promise<
       doc.setTextColor(0, 0, 0)
       y += 5
 
-      if (report.aiSummary) {
+      if (report.aiAnalysis) {
         doc.setFontSize(9)
         doc.setFont('helvetica', 'normal')
-        const summaryLines = doc.splitTextToSize(report.aiSummary, contentWidth - 5)
-        for (const line of summaryLines) {
+        const analysisLines = doc.splitTextToSize(report.aiAnalysis, contentWidth - 5)
+        for (const line of analysisLines) {
           addPageIfNeeded(4.5)
           doc.text(line, margin + 3, y)
           y += 4.5

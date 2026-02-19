@@ -11,7 +11,7 @@ export const useReportUpload = () => {
     file: File,
     inspectionId: string,
     reportType: CustomerReportType
-  ): Promise<{ fileUrl: string; fileName: string; fileType: string } | null> => {
+  ): Promise<{ id: string; fileUrl: string; fileName: string; fileType: string } | null> => {
     try {
       setUploading(reportType)
       setError(null)
@@ -34,7 +34,7 @@ export const useReportUpload = () => {
 
       const fileUrl = urlData.publicUrl
 
-      await supabase.rpc('save_customer_report', {
+      const { data, error: rpcError } = await supabase.rpc('save_customer_report', {
         p_inspection_id: inspectionId,
         p_report_type: reportType,
         p_file_url: fileUrl,
@@ -42,7 +42,11 @@ export const useReportUpload = () => {
         p_file_type: file.type,
       })
 
-      return { fileUrl, fileName: file.name, fileType: file.type }
+      if (rpcError) throw rpcError
+
+      const reportId = (data as { id: string }).id
+
+      return { id: reportId, fileUrl, fileName: file.name, fileType: file.type }
     } catch (err) {
       console.error('Error uploading report:', err)
       setError(err instanceof Error ? err.message : 'Failed to upload report')
@@ -53,12 +57,12 @@ export const useReportUpload = () => {
   }, [])
 
   const analyzeReport = useCallback(async (
+    reportId: string,
     fileUrl: string,
     reportType: CustomerReportType,
     fileType: string,
-    inspectionId: string,
     vehicleInfo?: { year?: number | null; make?: string; model?: string; trim?: string }
-  ): Promise<{ summary: string } | null> => {
+  ): Promise<{ analysis: string; verdict: string } | null> => {
     try {
       setAnalyzing(reportType)
 
@@ -74,15 +78,15 @@ export const useReportUpload = () => {
         return null
       }
 
-      const { summary } = await response.json()
+      const { analysis, verdict } = await response.json()
 
       await supabase.rpc('save_customer_report_analysis', {
-        p_inspection_id: inspectionId,
-        p_report_type: reportType,
-        p_ai_summary: summary,
+        p_report_id: reportId,
+        p_ai_analysis: analysis,
+        p_ai_verdict: verdict || 'ok',
       })
 
-      return { summary }
+      return { analysis, verdict }
     } catch (err) {
       console.error('Error analyzing report:', err)
       return null
@@ -92,6 +96,7 @@ export const useReportUpload = () => {
   }, [])
 
   const deleteReport = useCallback(async (
+    reportId: string,
     inspectionId: string,
     reportType: CustomerReportType
   ): Promise<boolean> => {
@@ -113,8 +118,7 @@ export const useReportUpload = () => {
       }
 
       await supabase.rpc('delete_customer_report', {
-        p_inspection_id: inspectionId,
-        p_report_type: reportType,
+        p_report_id: reportId,
       })
 
       return true

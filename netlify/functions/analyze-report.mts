@@ -64,7 +64,13 @@ Extract and summarize the following key findings:
 - Freeze frame data if present
 - Overall vehicle health assessment
 
-Provide a concise summary (3-5 paragraphs) of the findings. Focus on anything a car buyer should know. If codes are present, explain what they mean in plain language.`,
+Provide your response in this exact JSON format:
+{
+  "analysis": "your concise summary (3-5 paragraphs) focusing on what a car buyer should know",
+  "verdict": "ok" | "warning" | "issue"
+}
+
+Use "ok" if no problems found, "warning" for minor concerns or pending codes, "issue" for active DTCs or significant problems.`,
 
       carfax: `You are analyzing a CarFax vehicle history report for ${vehicleDesc}.
 
@@ -77,7 +83,13 @@ Extract and summarize the following key findings:
 - Open recalls
 - Any red flags
 
-Provide a concise summary (3-5 paragraphs) of the findings. Focus on anything a car buyer should know.`,
+Provide your response in this exact JSON format:
+{
+  "analysis": "your concise summary (3-5 paragraphs) focusing on what a car buyer should know",
+  "verdict": "ok" | "warning" | "issue"
+}
+
+Use "ok" if clean history, "warning" for minor concerns, "issue" for accidents, title problems, or major red flags.`,
 
       autocheck: `You are analyzing an AutoCheck vehicle history report for ${vehicleDesc}.
 
@@ -89,7 +101,13 @@ Extract and summarize the following key findings:
 - Number of owners
 - Any red flags or alerts
 
-Provide a concise summary (3-5 paragraphs) of the findings. Focus on anything a car buyer should know.`,
+Provide your response in this exact JSON format:
+{
+  "analysis": "your concise summary (3-5 paragraphs) focusing on what a car buyer should know",
+  "verdict": "ok" | "warning" | "issue"
+}
+
+Use "ok" if clean history, "warning" for minor concerns, "issue" for accidents, title problems, or major red flags.`,
     }
 
     const prompt = reportPrompts[reportType] || reportPrompts.obd2
@@ -159,10 +177,28 @@ Provide a concise summary (3-5 paragraphs) of the findings. Focus on anything a 
     }
 
     const claudeData = await claudeResponse.json()
-    const summary = claudeData.content?.[0]?.text || "Unable to analyze document."
+    const responseText = claudeData.content?.[0]?.text || ""
+
+    // Parse JSON response from Claude (same pattern as analyze-photo)
+    let analysis = responseText
+    let verdict = "ok"
+
+    try {
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        analysis = parsed.analysis || responseText
+        verdict = ["ok", "warning", "issue"].includes(parsed.verdict)
+          ? parsed.verdict
+          : "ok"
+      }
+    } catch {
+      // If JSON parsing fails, use the raw text as analysis
+      analysis = responseText || "Unable to analyze document."
+    }
 
     return new Response(
-      JSON.stringify({ summary }),
+      JSON.stringify({ analysis, verdict }),
       { status: 200, headers }
     )
   } catch (err) {

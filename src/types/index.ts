@@ -97,13 +97,16 @@ export interface InspectionPhoto {
 export type CustomerReportType = 'obd2' | 'carfax' | 'autocheck'
 
 export interface CustomerReport {
+  id: string
+  inspectionId: string
   reportType: CustomerReportType
   fileUrl: string
   fileName: string
   fileType: string
-  aiSummary: string | null
+  aiAnalysis: string | null
+  aiVerdict: 'ok' | 'warning' | 'issue' | null
   aiAnalyzedAt: Date | null
-  uploadedAt: Date
+  createdAt: Date
 }
 
 export interface VehicleKnownIssue {

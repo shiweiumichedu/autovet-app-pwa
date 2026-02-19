@@ -1,14 +1,51 @@
 -- ============================================
--- Add customer_reports JSONB column to inspections
--- Stores OBD II, CarFax, AutoCheck report metadata
+-- Refactor customer reports from JSONB to relational table
+-- Mirrors inspection_photos pattern
 -- Run this in Supabase SQL editor
 -- ============================================
 
--- 1. Add column
-ALTER TABLE public.inspections
-  ADD COLUMN IF NOT EXISTS customer_reports JSONB DEFAULT '[]'::jsonb;
+-- 1. Create the new table
+CREATE TABLE IF NOT EXISTS public.inspection_customer_reports (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  inspection_id   UUID NOT NULL REFERENCES public.inspections(id) ON DELETE CASCADE,
+  report_type     TEXT NOT NULL,
+  file_url        TEXT NOT NULL,
+  file_name       TEXT NOT NULL,
+  file_type       TEXT NOT NULL,
+  ai_analysis     TEXT,
+  ai_verdict      TEXT,
+  ai_analyzed_at  TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(inspection_id, report_type)
+);
 
--- 2. RPC: Save a customer report entry
+-- 2. Migrate existing JSONB data into the new table
+INSERT INTO public.inspection_customer_reports (inspection_id, report_type, file_url, file_name, file_type, ai_analysis, ai_analyzed_at, created_at)
+SELECT
+  i.id,
+  elem->>'report_type',
+  elem->>'file_url',
+  elem->>'file_name',
+  elem->>'file_type',
+  elem->>'ai_summary',
+  (elem->>'ai_analyzed_at')::timestamptz,
+  COALESCE((elem->>'uploaded_at')::timestamptz, now())
+FROM public.inspections i,
+     jsonb_array_elements(i.customer_reports) elem
+WHERE i.customer_reports IS NOT NULL
+  AND jsonb_array_length(i.customer_reports) > 0
+ON CONFLICT (inspection_id, report_type) DO NOTHING;
+
+-- 3. Drop the JSONB column
+ALTER TABLE public.inspections DROP COLUMN IF EXISTS customer_reports;
+
+-- 4. Drop old functions (return types changed, so CREATE OR REPLACE won't work)
+DROP FUNCTION IF EXISTS public.save_customer_report(UUID, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.save_customer_report_analysis(UUID, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.delete_customer_report(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.delete_customer_report(UUID);
+
+-- 5. RPC: Save a customer report (upsert)
 CREATE OR REPLACE FUNCTION public.save_customer_report(
   p_inspection_id UUID,
   p_report_type TEXT,
@@ -16,80 +53,61 @@ CREATE OR REPLACE FUNCTION public.save_customer_report(
   p_file_name TEXT,
   p_file_type TEXT
 )
-RETURNS VOID
+RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+DECLARE
+  v_id UUID;
 BEGIN
-  -- Remove existing entry for this report_type, then append new one
-  UPDATE public.inspections
-  SET customer_reports = (
-    SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-    FROM jsonb_array_elements(customer_reports) elem
-    WHERE elem->>'report_type' != p_report_type
-  ) || jsonb_build_array(jsonb_build_object(
-    'report_type', p_report_type,
-    'file_url', p_file_url,
-    'file_name', p_file_name,
-    'file_type', p_file_type,
-    'ai_summary', NULL,
-    'ai_analyzed_at', NULL,
-    'uploaded_at', now()
-  )),
-  updated_at = now()
-  WHERE id = p_inspection_id;
+  INSERT INTO public.inspection_customer_reports (inspection_id, report_type, file_url, file_name, file_type)
+  VALUES (p_inspection_id, p_report_type, p_file_url, p_file_name, p_file_type)
+  ON CONFLICT (inspection_id, report_type)
+  DO UPDATE SET file_url = p_file_url, file_name = p_file_name, file_type = p_file_type,
+                ai_analysis = NULL, ai_verdict = NULL, ai_analyzed_at = NULL
+  RETURNING id INTO v_id;
+
+  UPDATE public.inspections SET updated_at = now() WHERE id = p_inspection_id;
+
+  RETURN json_build_object('id', v_id);
 END;
 $$;
 
--- 3. RPC: Save AI analysis for a customer report
+-- 6. RPC: Save AI analysis for a customer report (by report id)
 CREATE OR REPLACE FUNCTION public.save_customer_report_analysis(
-  p_inspection_id UUID,
-  p_report_type TEXT,
-  p_ai_summary TEXT
+  p_report_id UUID,
+  p_ai_analysis TEXT,
+  p_ai_verdict TEXT
 )
-RETURNS VOID
+RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  UPDATE public.inspections
-  SET customer_reports = (
-    SELECT jsonb_agg(
-      CASE
-        WHEN elem->>'report_type' = p_report_type
-        THEN elem || jsonb_build_object('ai_summary', p_ai_summary, 'ai_analyzed_at', now())
-        ELSE elem
-      END
-    )
-    FROM jsonb_array_elements(customer_reports) elem
-  ),
-  updated_at = now()
-  WHERE id = p_inspection_id;
+  UPDATE public.inspection_customer_reports
+  SET ai_analysis = p_ai_analysis,
+      ai_verdict = p_ai_verdict,
+      ai_analyzed_at = now()
+  WHERE id = p_report_id;
+
+  RETURN json_build_object('success', true);
 END;
 $$;
 
--- 4. RPC: Delete a customer report
+-- 7. RPC: Delete a customer report (by report id)
 CREATE OR REPLACE FUNCTION public.delete_customer_report(
-  p_inspection_id UUID,
-  p_report_type TEXT
+  p_report_id UUID
 )
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  UPDATE public.inspections
-  SET customer_reports = (
-    SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-    FROM jsonb_array_elements(customer_reports) elem
-    WHERE elem->>'report_type' != p_report_type
-  ),
-  updated_at = now()
-  WHERE id = p_inspection_id;
+  DELETE FROM public.inspection_customer_reports WHERE id = p_report_id;
 END;
 $$;
 
--- 5. Update get_inspection to include customer_reports
+-- 8. Update get_inspection to include customer_reports from new table
 CREATE OR REPLACE FUNCTION public.get_inspection(p_inspection_id UUID)
 RETURNS JSON
 LANGUAGE plpgsql
@@ -117,7 +135,24 @@ BEGIN
     'report_url', i.report_url,
     'created_at', i.created_at,
     'updated_at', i.updated_at,
-    'customer_reports', COALESCE(i.customer_reports, '[]'::jsonb),
+    'customer_reports', (
+      SELECT COALESCE(json_agg(
+        json_build_object(
+          'id', cr.id,
+          'inspection_id', cr.inspection_id,
+          'report_type', cr.report_type,
+          'file_url', cr.file_url,
+          'file_name', cr.file_name,
+          'file_type', cr.file_type,
+          'ai_analysis', cr.ai_analysis,
+          'ai_verdict', cr.ai_verdict,
+          'ai_analyzed_at', cr.ai_analyzed_at,
+          'created_at', cr.created_at
+        )
+      ), '[]'::json)
+      FROM public.inspection_customer_reports cr
+      WHERE cr.inspection_id = i.id
+    ),
     'steps', (
       SELECT json_agg(
         json_build_object(
